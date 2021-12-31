@@ -1,0 +1,1168 @@
+#pragma warning (disable:4786)
+
+#include "DB.h"
+#include "Globals.h"
+#include "DBObjects.h"
+#include "DisconnectionEngine.h"
+
+#include <oraca.h>
+#include <sqlda.h>
+#include <sqlca.h>
+#include <iostream>
+#include <fstream>
+
+using namespace std;
+
+extern ofstream f_log;
+extern DisconnectionEngine o_DCEngine;
+
+void SqlError(char* zErr)
+{
+	cout << endl << zErr << endl;
+    sqlca.sqlerrm.sqlerrmc[sqlca.sqlerrm.sqlerrml] = '\0';
+    oraca.orastxt.orastxtc[oraca.orastxt.orastxtl] = '\0';
+    oraca.orasfnm.orasfnmc[oraca.orasfnm.orasfnml] = '\0';
+    cout << sqlca.sqlerrm.sqlerrmc << endl;
+    cout << "in " << oraca.orastxt.orastxtc << endl;
+    cout << "on line " << oraca.oraslnr << " of " << oraca.orasfnm.orasfnmc
+         << endl << endl;
+    EXEC SQL ROLLBACK RELEASE;
+	
+	//////////////////////////////////////////////////////////////////////////
+	f_log << endl << zErr << endl;
+    f_log << sqlca.sqlerrm.sqlerrmc << endl;
+    f_log.close();
+	//////////////////////////////////////////////////////////////////////////
+
+    exit(1);
+}
+
+////////////////////////////////////////////////////////////////////////////////////
+
+void Login(char* zLoginString)
+{
+	f_log << "\nConnecting to ORACLE" << endl;
+
+	EXEC SQL BEGIN DECLARE SECTION;
+		char *zLogin; 
+	EXEC SQL END DECLARE SECTION;
+
+	EXEC SQL WHENEVER SQLERROR DO SqlError("ORACLE error--");
+
+	zLogin = zLoginString;
+ 
+	EXEC SQL CONNECT :zLogin;
+	EXEC SQL ALTER SESSION SET NLS_DATE_FORMAT="DD/MM/YYYY HH24:MI:SS";
+
+	cout<<"\nConnected  to Database"<<endl<<endl; 
+	f_log<<"\nConnected  to Database"<<endl<<endl; 
+}
+
+////////////////////////////////////////////////////////////////////////////////////
+
+void Logout()
+{
+	cout<<"\nDisconnect from oracle"<<endl;
+	f_log<<"\nDisconnect from oracle"<<endl; 
+    EXEC SQL COMMIT WORK RELEASE; 
+}
+
+////////////////////////////////////////////////////////////////////////////////////
+//Loading the contract ids which should not-consider for the disconnection
+void DisconnectionEngine::LoadExemptedContractIDsCREDIT()
+{
+	EXEC SQL WHENEVER SQLERROR DO SqlError("ORACLE error : DisconnectionEngine::LoadExemptedContractIDsCREDIT ");
+	EXEC SQL BEGIN DECLARE SECTION;
+	
+	int rows_to_fetch;
+	int rows_before;
+	int rows_this_time;
+
+    struct stExempted_Mbc
+	{ 
+  		int		iContractID;
+	}a[FETCH_SIZE];
+
+	struct stExempted_MbcInd
+	{ 
+		short	iContractID;
+	}a_ind[FETCH_SIZE];
+
+	char    zQuerry[QUERY_LEN];
+
+	EXEC SQL END DECLARE SECTION;
+
+	rows_to_fetch = FETCH_SIZE;
+	rows_before = 0;
+	rows_this_time = FETCH_SIZE;
+
+	zQuerry[0] = '\0';
+	sprintf(zQuerry,"SELECT CONTRACT_ID \
+			FROM BD_CONTRACTS_EXEMPTED_CREDIT \
+			WHERE EXEMPT_TILL_DATE IS NOT NULL \
+			AND EXEMPT_TILL_DATE > SYSDATE");
+
+	EXEC SQL PREPARE built_query FROM :zQuerry;
+    EXEC SQL  DECLARE curExempCredit CURSOR FOR built_query;
+
+	EXEC SQL OPEN curExempCredit;
+	EXEC SQL WHENEVER NOT FOUND CONTINUE;
+		
+	while (rows_this_time == rows_to_fetch) 
+	{ 
+		EXEC SQL FETCH curExempCredit INTO :a INDICATOR :a_ind;
+		rows_this_time = sqlca.sqlerrd[2] - rows_before; 
+		rows_before = sqlca.sqlerrd[2]; 
+
+		for (int i=0; i<rows_this_time; i++) 
+		{ 
+			if(a_ind[i].iContractID < 0)
+			{
+				f_log<<"\nError indicator CONTRACT_ID in BD_CONTRACTS_EXEMPTED_CREDIT"<<endl;
+			}
+			else
+			{
+				map_ExemptedContractIDs.insert(make_pair(a[i].iContractID,2));
+			}
+		}
+	}
+
+	f_log<<"Loaded BD_CONTRACTS_EXEMPTED_CREDIT and BD_CONTRACTS_EXEMPTED_MBC "<<map_ExemptedContractIDs.size()<<endl;
+
+	EXEC SQL CLOSE curExempCredit;
+}
+
+////////////////////////////////////////////////////////////////////////////////////
+//Loading the contract ids which should not-consider for the disconnection
+
+void DisconnectionEngine::LoadExemptedContractIDsMBC()
+{
+	EXEC SQL WHENEVER SQLERROR DO SqlError("ORACLE error : DisconnectionEngine::LoadExemptedContractIDsMBC ");
+	EXEC SQL BEGIN DECLARE SECTION;
+	
+	int rows_to_fetch;
+	int rows_before;
+	int rows_this_time;
+
+    struct stExempted_Mbc
+	{ 
+  		int		iContractID;
+	}a[FETCH_SIZE];
+
+	struct stExempted_MbcInd
+	{ 
+		short	iContractID;
+	}a_ind[FETCH_SIZE];
+
+	char    zQuerry[QUERY_LEN];
+
+	EXEC SQL END DECLARE SECTION;
+
+	rows_to_fetch = FETCH_SIZE;
+	rows_before = 0;
+	rows_this_time = FETCH_SIZE;
+
+	zQuerry[0] = '\0';
+	sprintf(zQuerry,"SELECT CONTRACT_ID \
+			FROM BD_CONTRACTS_EXEMPTED_MBC \
+			WHERE EXEMPT_TILL_DATE IS NOT NULL \
+			AND EXEMPT_TILL_DATE > SYSDATE");
+
+	EXEC SQL PREPARE built_query FROM :zQuerry;
+    EXEC SQL  DECLARE curExempMbc CURSOR FOR built_query;
+
+	EXEC SQL OPEN curExempMbc;
+	EXEC SQL WHENEVER NOT FOUND CONTINUE;
+		
+	while (rows_this_time == rows_to_fetch) 
+	{ 
+		EXEC SQL FETCH curExempMbc INTO :a INDICATOR :a_ind;
+		rows_this_time = sqlca.sqlerrd[2] - rows_before; 
+		rows_before = sqlca.sqlerrd[2]; 
+
+		for (int i=0; i<rows_this_time; i++) 
+		{ 
+			if(a_ind[i].iContractID < 0)
+			{
+				f_log<<"\nError indicator CONTRACT_ID in BD_CONTRACTS_EXEMPTED_MBC"<<endl;
+			}
+			else
+			{
+				map_ExemptedContractIDs.insert(make_pair(a[i].iContractID,1));
+			}
+		}
+	}
+
+	f_log<<"Loaded BD_CONTRACTS_EXEMPTED_MBC "<<map_ExemptedContractIDs.size()<<endl;
+
+	EXEC SQL CLOSE curExempMbc;
+}
+
+////////////////////////////////////////////////////////////////////////////////////
+
+void Prov_Switch_Image::Load(char* zBillRunCode)
+{
+	EXEC SQL WHENEVER SQLERROR DO SqlError("ORACLE error : Prov_Switch_Image::Load ");
+	EXEC SQL BEGIN DECLARE SECTION;
+	
+	int rows_to_fetch;
+	int rows_before;
+	int rows_this_time;
+
+    struct stProv_Switch_Image
+	{ 
+  		int		iImageID;
+		char	zIMSI[IMSI_LEN];
+	}a[FETCH_SIZE];
+
+	struct stProv_Switch_ImageInd
+	{ 
+		short	iImageID;
+		short	iIMSI;
+	}a_ind[FETCH_SIZE];
+
+	char    zQuerry[QUERY_LEN];
+
+	EXEC SQL END DECLARE SECTION;
+
+	rows_to_fetch = FETCH_SIZE;
+	rows_before = 0;
+	rows_this_time = FETCH_SIZE;
+
+	zQuerry[0] = '\0';
+	sprintf(zQuerry,"SELECT IMAGE_ID, IMSI_NO \
+			FROM PROV_SWITCH_IMAGE PARTITION (%s) \
+			WHERE SWITCH_STATUS in ('C','B') \
+			AND CONN_TYPE <> 'VOICEPRE'",zBillRunCode);
+
+	EXEC SQL PREPARE built_query FROM :zQuerry;
+    EXEC SQL  DECLARE curPSI CURSOR FOR built_query;
+
+	EXEC SQL OPEN curPSI;
+	EXEC SQL WHENEVER NOT FOUND CONTINUE;
+		
+	while (rows_this_time == rows_to_fetch) 
+	{ 
+		EXEC SQL FETCH curPSI INTO :a INDICATOR :a_ind;
+		rows_this_time = sqlca.sqlerrd[2] - rows_before; 
+		rows_before = sqlca.sqlerrd[2]; 
+
+		for (int i=0; i<rows_this_time; i++) 
+		{ 
+			if((a_ind[i].iImageID < 0) || (a_ind[i].iIMSI < 0))
+			{
+				f_log<<"\nError indicator IMAGE_ID/IMSI in PROV_SWITCH_IMAGE"<<endl;
+			}
+			else
+			{
+				Prov_Switch_Image* pPSI = new Prov_Switch_Image();
+
+				pPSI->i_ImageID = a[i].iImageID;
+				strcpy(pPSI->z_Imsi,a[i].zIMSI);
+
+				map_ProvSwitchImage.insert(make_pair((char*)pPSI->z_Imsi,pPSI));
+			}
+		}
+	}
+
+	f_log<<"Loaded PROV_SWITCH_IMAGE "<<map_ProvSwitchImage.size()<<endl;
+
+	EXEC SQL CLOSE curPSI;
+}
+
+////////////////////////////////////////////////////////////////////////////////////
+
+void Dyn_1_Connection::Load(char *zBillRunCode)
+{
+	EXEC SQL WHENEVER SQLERROR DO SqlError("ORACLE error : Dyn_1_Connection::Load ");
+	EXEC SQL BEGIN DECLARE SECTION;
+	
+	int rows_to_fetch;
+	int rows_before;
+	int rows_this_time;
+
+    struct stDyn_1_Connection
+	{ 
+  		int		iConnectionID;
+		char	zIMSI[IMSI_LEN];
+		char	zMobileNo[MOBILE_NO_LEN];
+	}a[FETCH_SIZE];
+
+	struct stDyn_1_ConnectionInd
+	{ 
+		short	iConnectionID;
+		short	iIMSI;
+		short	iMobileNo;
+	}a_ind[FETCH_SIZE];
+
+	char    zQuerry[QUERY_LEN];
+
+	EXEC SQL END DECLARE SECTION;
+
+	rows_to_fetch = FETCH_SIZE;
+	rows_before = 0;
+	rows_this_time = FETCH_SIZE;
+
+	zQuerry[0] = '\0';
+	sprintf(zQuerry,"SELECT MIN(CONNECTION_ID),IMSI,MOBILE_NO \
+					FROM DYN_1_CONNECTION PARTITION (%s) \
+					WHERE SERVICE_ID IN (1,2,3) \
+					GROUP BY IMSI, MOBILE_NO",zBillRunCode);
+
+	EXEC SQL PREPARE built_query FROM :zQuerry;
+    EXEC SQL  DECLARE curD1C CURSOR FOR built_query;
+
+	EXEC SQL OPEN curD1C;
+	EXEC SQL WHENEVER NOT FOUND CONTINUE;
+		
+	while (rows_this_time == rows_to_fetch) 
+	{ 
+		EXEC SQL FETCH curD1C INTO :a INDICATOR :a_ind;
+		rows_this_time = sqlca.sqlerrd[2] - rows_before; 
+		rows_before = sqlca.sqlerrd[2]; 
+
+		for (int i=0; i<rows_this_time; i++) 
+		{ 
+			if((a_ind[i].iConnectionID < 0) || (a_ind[i].iIMSI < 0) || (a_ind[i].iMobileNo < 0))
+			{
+				f_log<<"\nError indicator CONNECTION_ID/IMSI/MOBILE_NO in DYN_1_CONNECTION"<<endl;
+			}
+			else
+			{
+				Dyn_1_Connection* pD1C = new Dyn_1_Connection();
+
+				pD1C->i_ConnectionID = a[i].iConnectionID;
+				strcpy(pD1C->z_Imsi,a[i].zIMSI);
+				strcpy(pD1C->z_MobileNo,a[i].zMobileNo);
+
+				map_Dyn1Connection.insert(make_pair(pD1C->i_ConnectionID,pD1C));
+				map_Dyn1ConnectionByImsi.insert(make_pair((char*)pD1C->z_Imsi,pD1C));
+			}
+		}
+	}
+
+	f_log<<"Loaded DYN_1_CONNECTION by ConnectionID "<<map_Dyn1Connection.size()<<endl;
+	f_log<<"Loaded DYN_1_CONNECTION by Imsi "<<map_Dyn1Connection.size()<<endl;
+
+	EXEC SQL CLOSE curD1C;
+
+}
+
+////////////////////////////////////////////////////////////////////////////////////
+
+void Cam_Connection::Load(char *zBillRunCode)
+{
+	EXEC SQL WHENEVER SQLERROR DO SqlError("ORACLE error : Cam_Connection::Load ");
+	EXEC SQL BEGIN DECLARE SECTION;
+	
+	int rows_to_fetch;
+	int rows_before;
+	int rows_this_time;
+
+    struct stCam_Connection
+	{ 
+  		int		iConnectionID;
+		char	iPkgContractID;
+		char	iImageID;
+	}a[FETCH_SIZE];
+
+	struct stCam_ConnectionInd
+	{ 
+		short	iConnectionID;
+		short	iPkgContractID;
+		short	iImageID;
+	}a_ind[FETCH_SIZE];
+
+	char    zQuerry[QUERY_LEN];
+
+	EXEC SQL END DECLARE SECTION;
+
+	rows_to_fetch = FETCH_SIZE;
+	rows_before = 0;
+	rows_this_time = FETCH_SIZE;
+
+	zQuerry[0] = '\0';
+	sprintf(zQuerry,"SELECT CONNECTION_ID,PACKAGE_CONTRACT_ID,IMAGE_ID \
+					FROM CAM_CONNECTION PARTITION (%s)",zBillRunCode);
+
+	EXEC SQL PREPARE built_query FROM :zQuerry;
+    EXEC SQL  DECLARE curCC CURSOR FOR built_query;
+
+	EXEC SQL OPEN curCC;
+	EXEC SQL WHENEVER NOT FOUND CONTINUE;
+		
+	while (rows_this_time == rows_to_fetch) 
+	{ 
+		EXEC SQL FETCH curCC INTO :a INDICATOR :a_ind;
+		rows_this_time = sqlca.sqlerrd[2] - rows_before; 
+		rows_before = sqlca.sqlerrd[2]; 
+
+		for (int i=0; i<rows_this_time; i++) 
+		{ 
+			if((a_ind[i].iConnectionID < 0) || (a_ind[i].iPkgContractID < 0) || (a_ind[i].iImageID < 0))
+			{
+				f_log<<"\nError indicator CONNECTION_ID/PACKAGE_CONTRACT_ID/IMAGE_ID in CAM_CONNECTION"<<endl;
+			}
+			else
+			{
+				Cam_Connection* pCC = new Cam_Connection();
+
+				pCC->i_ConnectionID = a[i].iConnectionID;
+				pCC->i_PkgContarctID = a[i].iPkgContractID;
+				pCC->i_ImageID = a[i].iImageID;
+
+				map_CamConnection.insert(make_pair(pCC->i_ConnectionID,pCC));
+			}
+		}
+	}
+
+	f_log<<"Loaded CAM_CONNECTION "<<map_CamConnection.size()<<endl;
+
+	EXEC SQL CLOSE curCC;
+}
+
+////////////////////////////////////////////////////////////////////////////////////
+
+void Cam_Contract_Package::Load(char *zBillRunCode)
+{
+	EXEC SQL WHENEVER SQLERROR DO SqlError("ORACLE error : Cam_Contract_Package::Load ");
+	EXEC SQL BEGIN DECLARE SECTION;
+	
+	int rows_to_fetch;
+	int rows_before;
+	int rows_this_time;
+
+    struct stCam_Contract_Package
+	{ 
+		int		iContractPkgID;
+  		int		iContractID;
+	}a[FETCH_SIZE];
+
+	struct stCam_Contract_PackageInd
+	{ 
+		short	iContractPkgID;
+		short	iContractID;
+	}a_ind[FETCH_SIZE];
+
+	char    zQuerry[QUERY_LEN];
+
+	EXEC SQL END DECLARE SECTION;
+
+	rows_to_fetch = FETCH_SIZE;
+	rows_before = 0;
+	rows_this_time = FETCH_SIZE;
+
+	zQuerry[0] = '\0';
+	sprintf(zQuerry,"SELECT CONTRACT_PACKAGE_ID,CONTRACT_ID \
+					FROM CAM_CONTRACT_PACKAGE PARTITION (%s)",zBillRunCode);
+
+	EXEC SQL PREPARE built_query FROM :zQuerry;
+    EXEC SQL  DECLARE curCCP CURSOR FOR built_query;
+
+	EXEC SQL OPEN curCCP;
+	EXEC SQL WHENEVER NOT FOUND CONTINUE;
+		
+	while (rows_this_time == rows_to_fetch) 
+	{ 
+		EXEC SQL FETCH curCCP INTO :a INDICATOR :a_ind;
+		rows_this_time = sqlca.sqlerrd[2] - rows_before; 
+		rows_before = sqlca.sqlerrd[2]; 
+
+		for (int i=0; i<rows_this_time; i++) 
+		{ 
+			if((a_ind[i].iContractPkgID < 0) || (a_ind[i].iContractID < 0))
+			{
+				f_log<<"\nError indicator CONTRACT_PACKAGE_ID/CONTRACT_ID in CAM_CONTRACT_PACKAGE"<<endl;
+			}
+			else
+			{
+				Cam_Contract_Package* pCCP = new Cam_Contract_Package();
+
+				pCCP->i_ContractPkgID = a[i].iContractPkgID;
+				pCCP->i_ContractID = a[i].iContractID;
+
+				map_CamContractPkg.insert(make_pair(pCCP->i_ContractPkgID,pCCP));
+			}
+		}
+	}
+
+	f_log<<"Loaded CAM_CONTRACT_PACKAGE "<<map_CamContractPkg.size()<<endl;
+
+	EXEC SQL CLOSE curCCP;
+}
+
+////////////////////////////////////////////////////////////////////////////////////
+
+void Cam_Contract::Load(char *zBillRunCode)
+{
+	EXEC SQL WHENEVER SQLERROR DO SqlError("ORACLE error : Cam_Contract::Load ");
+	EXEC SQL BEGIN DECLARE SECTION;
+	
+	int rows_to_fetch;
+	int rows_before;
+	int rows_this_time;
+
+    struct stCam_Contract_Package
+	{ 
+  		int		iContractID;
+		char	zCreditType[CREDIT_TYPE_LEN];
+	}a[FETCH_SIZE];
+
+	struct stCam_Contract_PackageInd
+	{ 
+		short	iContractID;
+		short	iCreditType;
+	}a_ind[FETCH_SIZE];
+
+	char    zQuerry[QUERY_LEN];
+
+	EXEC SQL END DECLARE SECTION;
+
+	rows_to_fetch = FETCH_SIZE;
+	rows_before = 0;
+	rows_this_time = FETCH_SIZE;
+
+	zQuerry[0] = '\0';
+	sprintf(zQuerry,"SELECT CONTRACT_ID,CREDIT_TYPE \
+					FROM CAM_CONTRACT PARTITION (%s)",zBillRunCode);
+
+	EXEC SQL PREPARE built_query FROM :zQuerry;
+    EXEC SQL  DECLARE curCCon CURSOR FOR built_query;
+
+	EXEC SQL OPEN curCCon;
+	EXEC SQL WHENEVER NOT FOUND CONTINUE;
+		
+	while (rows_this_time == rows_to_fetch) 
+	{ 
+		EXEC SQL FETCH curCCon INTO :a INDICATOR :a_ind;
+		rows_this_time = sqlca.sqlerrd[2] - rows_before; 
+		rows_before = sqlca.sqlerrd[2]; 
+
+		for (int i=0; i<rows_this_time; i++) 
+		{ 
+			if((a_ind[i].iContractID < 0) || (a_ind[i].iCreditType < 0))
+			{
+				f_log<<"\nError indicator CONTRACT_ID/CREDIT_TYPE in CAM_CONTRACT"<<endl;
+			}
+			else
+			{
+				Cam_Contract* pCCon = new Cam_Contract();
+
+				pCCon->i_ContractID = a[i].iContractID;
+				strcpy(pCCon->z_CreditType,a[i].zCreditType);
+
+				map_CamContract.insert(make_pair(pCCon->i_ContractID,pCCon));
+			}
+		}
+	}
+
+	f_log<<"Loaded CAM_CONTRACT "<<map_CamContract.size()<<endl;
+
+	EXEC SQL CLOSE curCCon;
+}
+
+////////////////////////////////////////////////////////////////////////////////////
+
+void Cam_Primary_Supplementary::Load()
+{
+	EXEC SQL WHENEVER SQLERROR DO SqlError("ORACLE error : Cam_Primary_Supplementary::Load ");
+	EXEC SQL BEGIN DECLARE SECTION;
+	
+	int rows_to_fetch;
+	int rows_before;
+	int rows_this_time;
+
+    struct stCam_Primary_Supplementary
+	{ 
+  		int		iPrimaryConPkgID;
+		int		iSecondConPkgID;
+	}a[FETCH_SIZE];
+
+	struct stCam_Primary_SupplementaryInd
+	{ 
+		short	iPrimaryConPkgID;
+		short	iSecondConPkgID;
+	}a_ind[FETCH_SIZE];
+
+	char    zQuerry[QUERY_LEN];
+
+	EXEC SQL END DECLARE SECTION;
+
+	rows_to_fetch = FETCH_SIZE;
+	rows_before = 0;
+	rows_this_time = FETCH_SIZE;
+
+	zQuerry[0] = '\0';
+	sprintf(zQuerry,"SELECT PRIMARY_CONTRACT_PACKAGE_ID,SUPP_CONTRACT_PACKAGE_ID \
+						FROM CAM_PRIMARY_SUPPLEMENTARY WHERE IS_ACTIVE = 'T'");
+
+	EXEC SQL PREPARE built_query FROM :zQuerry;
+    EXEC SQL  DECLARE curPS CURSOR FOR built_query;
+
+	EXEC SQL OPEN curPS;
+	EXEC SQL WHENEVER NOT FOUND CONTINUE;
+		
+	while (rows_this_time == rows_to_fetch) 
+	{ 
+		EXEC SQL FETCH curPS INTO :a INDICATOR :a_ind;
+		rows_this_time = sqlca.sqlerrd[2] - rows_before; 
+		rows_before = sqlca.sqlerrd[2]; 
+
+		for (int i=0; i<rows_this_time; i++) 
+		{ 
+			if((a_ind[i].iPrimaryConPkgID < 0) || (a_ind[i].iSecondConPkgID < 0))
+			{
+				f_log<<"\nError indicator PRIMARY_CONTRACT_PACKAGE_ID/SUPP_CONTRACT_PACKAGE_ID in CAM_PRIMARY_SUPPLEMENTARY"<<endl;
+			}
+			else
+			{
+				Cam_Primary_Supplementary* pPS = Cam_Primary_Supplementary::FindPrimary(a[i].iPrimaryConPkgID);
+
+				if(pPS == NULL)
+				{
+					pPS = new Cam_Primary_Supplementary();
+					pPS->i_PrimaryContractPkgID = a[i].iPrimaryConPkgID;
+					pPS->lst_SupplimentaryContractPkgIDs.push_back(a[i].iSecondConPkgID);
+
+					map_CamPrimarySupplimentary.insert(make_pair(pPS->i_PrimaryContractPkgID,pPS));
+				}
+				else
+				{
+					pPS->lst_SupplimentaryContractPkgIDs.push_back(a[i].iSecondConPkgID);
+				}
+			}
+		}
+	}
+
+	f_log<<"Loaded CAM_CONTRACT "<<map_CamPrimarySupplimentary.size()<<endl;
+
+	EXEC SQL CLOSE curPS;
+}
+
+////////////////////////////////////////////////////////////////////////////////////
+
+void DisconnectionEngine::LoadExemptedDate(int iDateOffsetFromToday)
+{
+	EXEC SQL WHENEVER SQLERROR DO SqlError("ORACLE error : DisconnectionEngine::LoadExemptedDate ");
+
+	EXEC SQL BEGIN DECLARE SECTION;
+		char	zExcemptedDate[DATE_LEN];
+		int		iDateOffSet;
+	EXEC SQL END DECLARE SECTION;
+
+	zExcemptedDate[0] = '\0';
+	iDateOffSet = iDateOffsetFromToday;
+	
+	EXEC SQL SELECT SYSDATE - :iDateOffSet INTO :zExcemptedDate FROM DUAL;
+	
+	o_ExemptedDate.setRengDateTime(zExcemptedDate);
+
+	f_log<<"Exempted Date "<<o_ExemptedDate.o_Date.i_Year<<":"<<o_ExemptedDate.o_Date.i_Month<<":"
+		 <<o_ExemptedDate.o_Date.i_Day<<" "<<o_ExemptedDate.o_Time.i_Hour<<":"
+		 <<o_ExemptedDate.o_Time.i_Min<<":"<<o_ExemptedDate.o_Time.i_Second<<endl;
+}
+
+////////////////////////////////////////////////////////////////////////////////////
+
+void DisconnectionEngine::ReadConfigParameters()
+{
+	EXEC SQL WHENEVER SQLERROR DO SqlError("ORACLE error : DisconnectionEngine::ReadConfigParameters 1 ");
+
+	EXEC SQL BEGIN DECLARE SECTION;
+		char	zMaxEnteredDate[DATE_LEN];
+
+		char	zRowID[ROW_ID_LEN];
+		char	zBillRunCode[BILL_RUN_CODE_LEN];
+		char	zOperationMode[OPERATION_MODE_LEN];
+		double	dMinOutstanding;
+		char	zApplicableCreditTypes[APPLICABLE_CREDIT_TYPE_LEN];
+		int		iMaxActionCount;
+		int		iExemptedDays;
+
+	EXEC SQL END DECLARE SECTION;
+
+	zMaxEnteredDate[0] = '\0';
+	
+	EXEC SQL SELECT MAX(ENTERED_TIME) INTO :zMaxEnteredDate FROM BD_CONFIG_PARAMETERS  \
+	WHERE COMPLETED_TIME IS NULL;
+
+	EXEC SQL WHENEVER SQLERROR DO SqlError("ORACLE error : DisconnectionEngine::ReadConfigParameters 2 ");
+
+	EXEC SQL SELECT ROWID, BILL_RUN_CODE, OPERATION_MODE, MIN_OUTSTANDING, APPLICABLE_CREDIT_TYPE, MAX_ACTION_COUNT, EXEMPTED_DAYS
+			INTO :zRowID, :zBillRunCode, :zOperationMode, :dMinOutstanding , :zApplicableCreditTypes, :iMaxActionCount, :iExemptedDays\
+			FROM BD_CONFIG_PARAMETERS \
+			WHERE ENTERED_TIME = TO_DATE(:zMaxEnteredDate,'DD/MM/YYYY HH24:MI:SS');
+
+	//////////////////////////////////////////////////////////
+	const char* zDelimiter = ",";
+    char* zToken = " ";
+
+	zToken = strtok(zApplicableCreditTypes,zDelimiter);
+
+	while(zToken != NULL )
+	{
+		char* zTmp = new char[CREDIT_TYPE_LEN];
+		strcpy(zTmp,zToken);
+
+		map_ApplicableCreditTypes.insert(make_pair(zTmp,1));
+		zToken = strtok( NULL, zDelimiter);
+	}
+
+	strcpy(z_RowID,zRowID);
+	strcpy(z_BillRunCode,zBillRunCode);
+	strcpy(z_OperationMode,zOperationMode);
+
+	//Parameters used for provisioning commands
+	if(strcmp(zOperationMode,"OW") == 0)
+	{
+		strcpy(z_StatusReason,"BB");
+		strcpy(z_ActionCode,"OAOB");
+	}
+	else if(strcmp(zOperationMode,"BW") == 0)
+	{
+		strcpy(z_StatusReason,"BT");
+		strcpy(z_ActionCode,"OABD");
+	}
+	//
+
+	d_MinOutstanding = dMinOutstanding;
+	i_MaxActionCount = iMaxActionCount;
+	i_ExemptedDays = iExemptedDays;
+
+	//////////////////////////////////////////////////////////
+
+	f_log<<"BD_CONFIG_PARAMETERS "<<z_BillRunCode<<"|"<<z_OperationMode<<"|"
+			<<d_MinOutstanding<<"|"<<i_MaxActionCount<<"|"<<i_ExemptedDays<<"|"<<zApplicableCreditTypes<<endl;
+}
+
+////////////////////////////////////////////////////////////////////////////////////
+
+void Bd_Fb_Contract_Trxns_V::Load()
+{
+	EXEC SQL WHENEVER SQLERROR DO SqlError("ORACLE error : Bd_Fb_Contract_Trxns_V::Load ");
+	EXEC SQL BEGIN DECLARE SECTION;
+	
+	int rows_to_fetch;
+	int rows_before;
+	int rows_this_time;
+
+    struct stBd_Fb_Contract_Trxns_V
+	{ 
+  		int		iContractID;
+		char	zTranType[TRAN_TYPE_LEN];
+		char	zTranDate[DATE_LEN];
+		double	dTranAmount;
+	}a[FETCH_SIZE];
+
+	struct stBd_Fb_Contract_Trxns_VInd
+	{ 
+		short	iContractID;
+		short	iTranType;
+		short	iTranDate;
+		short	iTranAmount;
+	}a_ind[FETCH_SIZE];
+
+	char    zQuerry[QUERY_LEN];
+
+	EXEC SQL END DECLARE SECTION;
+
+	RengDateTime	oTranTime;
+
+	rows_to_fetch = FETCH_SIZE;
+	rows_before = 0;
+	rows_this_time = FETCH_SIZE;
+
+	zQuerry[0] = '\0';
+	sprintf(zQuerry,"SELECT CONTRACT_ID,TRAN_TYPE,TRAN_DATE, TRAN_AMOUNT FROM BD_FB_CONTRACT_TRXNS_V");
+
+	EXEC SQL PREPARE built_query FROM :zQuerry;
+    EXEC SQL  DECLARE curBal CURSOR FOR built_query;
+
+	EXEC SQL OPEN curBal;
+	EXEC SQL WHENEVER NOT FOUND CONTINUE;
+		
+	while (rows_this_time == rows_to_fetch) 
+	{ 
+		EXEC SQL FETCH curBal INTO :a INDICATOR :a_ind;
+		rows_this_time = sqlca.sqlerrd[2] - rows_before; 
+		rows_before = sqlca.sqlerrd[2]; 
+
+		for (int i=0; i<rows_this_time; i++) 
+		{ 
+			if((a_ind[i].iContractID < 0) || (a_ind[i].iTranType < 0) 
+				|| (a_ind[i].iTranDate < 0) || (a_ind[i].iTranAmount < 0))
+			{
+				f_log<<"\nError indicator CONTRACT_ID/TRAN_TYPE/TRAN_DATE/TRAN_AMOUNT in BD_FB_CONTRACT_TRXNS_V"<<endl;
+			}
+			else
+			{
+				Bd_Fb_Contract_Trxns_V* pConBal = Bd_Fb_Contract_Trxns_V::Find(a[i].iContractID);
+				oTranTime.setRengDateTime(a[i].zTranDate);
+
+				if(pConBal == NULL)
+				{
+					pConBal = new Bd_Fb_Contract_Trxns_V();
+					
+					pConBal->i_ContractID = a[i].iContractID;
+					map_ContractBalance.insert(make_pair(pConBal->i_ContractID,pConBal));
+				}
+				
+				//
+				if(strcmp(a[i].zTranType,"BILL") == 0)
+				{
+					if(o_DCEngine.o_ExemptedDate < oTranTime)	//Exempted Bill
+					{
+						pConBal->d_ExemptedBillAmount += a[i].dTranAmount;
+					}
+					else
+					{
+						pConBal->d_TranAmount += a[i].dTranAmount;
+					}
+				}
+				else
+				{
+					pConBal->d_TranAmount += a[i].dTranAmount;
+				}
+				//
+			}
+		}
+	}
+
+	f_log<<"Loaded BD_FB_CONTRACT_TRXNS_V "<<map_ContractBalance.size()<<endl;
+
+	EXEC SQL CLOSE curBal;
+}
+
+////////////////////////////////////////////////////////////////////////////////////
+
+void Bd_Fb_Deposits_V::Load()
+{
+	EXEC SQL WHENEVER SQLERROR DO SqlError("ORACLE error : Bd_Fb_Deposits_V::Load ");
+	EXEC SQL BEGIN DECLARE SECTION;
+	
+	int rows_to_fetch;
+	int rows_before;
+	int rows_this_time;
+
+    struct stBd_Fb_Deposits_V
+	{ 
+  		int		iContractID;
+		double	dDepositAmount;
+		double	dCreditLimit;
+		int		iContractPkgID;
+
+	}a[FETCH_SIZE];
+
+	struct stBd_Fb_Deposits_VInd
+	{ 
+		short	iContractID;
+		short	iDepositAmount;
+		short	iCreditLimit;
+		short	iContractPkgID;
+	}a_ind[FETCH_SIZE];
+
+	char    zQuerry[QUERY_LEN];
+
+	EXEC SQL END DECLARE SECTION;
+
+	rows_to_fetch = FETCH_SIZE;
+	rows_before = 0;
+	rows_this_time = FETCH_SIZE;
+
+	zQuerry[0] = '\0';
+	sprintf(zQuerry,"SELECT NODE_ID,DEPOSIT_AMOUNT,CREDIT_LIMIT,CONTRACT_PACKAGE_ID FROM BD_FB_DEPOSITS_V");
+
+	EXEC SQL PREPARE built_query FROM :zQuerry;
+    EXEC SQL  DECLARE curDeposit CURSOR FOR built_query;
+
+	EXEC SQL OPEN curDeposit;
+	EXEC SQL WHENEVER NOT FOUND CONTINUE;
+		
+	while (rows_this_time == rows_to_fetch) 
+	{ 
+		EXEC SQL FETCH curDeposit INTO :a INDICATOR :a_ind;
+		rows_this_time = sqlca.sqlerrd[2] - rows_before; 
+		rows_before = sqlca.sqlerrd[2]; 
+
+		for (int i=0; i<rows_this_time; i++) 
+		{ 
+			if((a_ind[i].iContractID < 0) || (a_ind[i].iDepositAmount < 0) 
+				|| (a_ind[i].iCreditLimit < 0) || (a_ind[i].iContractPkgID < 0))
+			{
+				f_log<<"\nError indicator NODE_ID/DEPOSIT_AMOUNT/CREDIT_LIMIT/CONTRACT_PACKAGE_ID in BD_FB_DEPOSITS_V"<<endl;
+			}
+			else
+			{
+				Bd_Fb_Deposits_V* pDeposit = Bd_Fb_Deposits_V::Find(a[i].iContractID);
+
+				if(pDeposit == NULL)
+				{
+					pDeposit = new Bd_Fb_Deposits_V();
+					
+					pDeposit->i_ContractID = a[i].iContractID;
+					map_Deposit.insert(make_pair(pDeposit->i_ContractID,pDeposit));
+				}
+				
+				//
+				pDeposit->i_ContractPkgID = a[i].iContractPkgID;
+				pDeposit->d_DepositAmount += a[i].dDepositAmount;
+				pDeposit->d_CreditLimit += a[i].dCreditLimit;
+				//
+			}
+		}
+	}
+
+	f_log<<"Loaded BD_FB_DEPOSITS_V "<<map_Deposit.size()<<endl;
+
+	EXEC SQL CLOSE curDeposit;
+}
+
+////////////////////////////////////////////////////////////////////////////////////
+
+void DisconnectionEngine::InsertToBulkDisconnectionDetails()
+{
+	EXEC SQL BEGIN DECLARE SECTION;	
+	struct stData
+	{ 
+		int		iContractID;
+		char	zMobileNo[MOBILE_NO_LEN];
+		double	dOutstandingAmount;
+		char	zAction[ACTION_LEN];
+		char	zStatus[STATUS_LEN];
+		char	zEnteredDate[DATE_LEN];
+		char	zCreditType[CREDIT_TYPE_LEN];
+ 	}a[FETCH_SIZE]; 
+
+	int i = 0;
+	int iRemainder = 0;
+
+	char	zToday[DATE_LEN];
+
+	EXEC SQL END DECLARE SECTION;
+
+	bool bHaveMore = false;
+
+	EXEC SQL WHENEVER SQLERROR DO SqlError("ORACLE error : DisconnectionEngine::InsertToBulkDisconnectionDetails 1");
+	EXEC SQL SELECT SYSDATE INTO :zToday FROM DUAL;
+
+	EXEC SQL WHENEVER SQLERROR DO SqlError("ORACLE error : DisconnectionEngine::InsertToBulkDisconnectionDetails 2");
+
+	map<char*, Prov_Switch_Image*, ltstr>::iterator ite_prov_switch_img;
+	ite_prov_switch_img = Prov_Switch_Image::map_ProvSwitchImage.begin();
+	
+	for( ; ite_prov_switch_img != Prov_Switch_Image::map_ProvSwitchImage.end(); i++,ite_prov_switch_img++)
+	{
+		Prov_Switch_Image* pProv_Switch_Image = ite_prov_switch_img->second;
+
+		//////////////////////////////////////////////////////////
+		if(i == FETCH_SIZE)
+		{
+			EXEC SQL FOR :FETCH_SIZE INSERT INTO BD_BULK_DISCONNECTION_DETAILS
+					(CONTRACT_ID,MOBILE_NO,OUTSTANDING_AMOUNT,ACTION,STATUS,ENTERED_DATE,CREDIT_TYPE)	
+					VALUES (:a);
+
+			bHaveMore = false;
+			iRemainder = 1;
+			i = 0;
+		}
+		else
+		{
+			bHaveMore = true;
+			iRemainder++;
+		}
+
+		if(pProv_Switch_Image->pDisconnectData != NULL)
+		{
+			a[i].iContractID = pProv_Switch_Image->pDisconnectData->i_ContractID;
+			strcpy(a[i].zMobileNo,pProv_Switch_Image->pDisconnectData->z_MobileNo); 
+			a[i].dOutstandingAmount = pProv_Switch_Image->pDisconnectData->d_OutstandingAmount;
+			strcpy(a[i].zAction,z_OperationMode);	//??? is this correct
+			strcpy(a[i].zStatus,pProv_Switch_Image->pDisconnectData->z_Status);
+			strcpy(a[i].zEnteredDate,zToday);
+			strcpy(a[i].zCreditType,pProv_Switch_Image->pDisconnectData->z_CreditType);
+		}
+		else
+		{
+			//For data error scenarios, I put Image id instead of contract id
+			a[i].iContractID = pProv_Switch_Image->i_ImageID;
+			strcpy(a[i].zMobileNo,"NO_DATA");
+			a[i].dOutstandingAmount = 0.00;
+			strcpy(a[i].zAction,z_OperationMode);
+			strcpy(a[i].zStatus,"NO_DATA");
+			strcpy(a[i].zEnteredDate,zToday);
+			strcpy(a[i].zCreditType,"DATA");
+
+			f_log<<"Data Error : check image id "<<pProv_Switch_Image->i_ImageID<<endl;
+		}
+		//////////////////////////////////////////////////////////
+
+		//f_log<<a[i].iContractID<<"|"<<a[i].zMobileNo<<"|"<<a[i].zCreditType<<"|"<<endl;
+		//<<
+		//		a[i].dOutstandingAmount<<"|"<<a[i].zAction<<"|"<<a[i].zStatus<<"|"<<a[i].zEnteredDate<<endl;
+	}
+
+	//////////////////////////////////////////////////////////
+	if(bHaveMore)
+	{
+			EXEC SQL FOR :iRemainder INSERT INTO BD_BULK_DISCONNECTION_DETAILS
+				(CONTRACT_ID,MOBILE_NO,OUTSTANDING_AMOUNT,ACTION,STATUS,ENTERED_DATE,CREDIT_TYPE)
+				VALUES (:a);
+	}
+	//////////////////////////////////////////////////////////
+
+	EXEC SQL COMMIT;
+}
+
+////////////////////////////////////////////////////////////////////////////////////
+
+void DisconnectionEngine::InsertToBulkDisconnectionSummary()
+{
+	EXEC SQL WHENEVER SQLERROR DO SqlError("ORACLE error : DisconnectionEngine::InsertToBulkDisconnectionSummary ");
+
+	EXEC SQL BEGIN DECLARE SECTION;	
+		char	zBillRunCode[BILL_RUN_CODE_LEN];
+		int		iTotActionTaken;
+		int		iTotActionRejected;
+		double	dLastOutstanding;
+	EXEC SQL END DECLARE SECTION;
+
+	strcpy(zBillRunCode,z_BillRunCode);
+	iTotActionTaken = i_TotalActionTaken;
+	iTotActionRejected = i_TotalActionRejected;
+	dLastOutstanding = d_LastExecutedOutstanding;
+	
+	EXEC SQL INSERT INTO BD_BULK_DISCONNECTION_SUMMARY \
+			 (BILL_RUN_CODE, TOTAL_ACTION_TAKEN, TOTAL_REJECT_ACTIONS, LAST_EXECUTED_OUTSTANDING) \
+	VALUES (:zBillRunCode,:iTotActionTaken,:iTotActionRejected,:dLastOutstanding); 
+
+	EXEC SQL COMMIT;
+}
+
+////////////////////////////////////////////////////////////////////////////////////
+
+int DisconnectionEngine::GetNextGroupID()
+{
+	EXEC SQL BEGIN DECLARE SECTION;	
+		int		iSeqNo;
+	EXEC SQL END DECLARE SECTION;
+	
+	//get group id
+	EXEC SQL WHENEVER SQLERROR DO SqlError("ORACLE error : DisconnectionEngine::GetNextGroupID ");
+	EXEC SQL EXECUTE 
+		BEGIN
+			:iSeqNo := CAM_NODE_CREATION.GET_CAM_AUTONUMBER('CGRNO');
+		END; 
+	END-EXEC;
+	//
+
+	return iSeqNo;
+}
+
+////////////////////////////////////////////////////////////////////////////////////
+
+void DisconnectionEngine::InsertToPendingCommandsTable()
+{
+	//sms and performa no need to send prov commands
+	if(((z_OperationMode,"SMS") == 0) || ((z_OperationMode,"PFM") == 0))
+	{
+		f_log<<"Operation mode is SMS/PFM and no need to send provisioning commands"<<endl;
+		return;
+	}
+	//
+
+	EXEC SQL BEGIN DECLARE SECTION;	
+		int		iGroupID;
+		int		iConnectionID;
+		char	zActionCode[ACTION_CODE_LEN];
+		char	zService[SERVICE_LEN];
+		char	zActivationDate[DATE_LEN];
+		char	zIndividualBatch[INDIVIDUAL_BATCH_LEN];
+		char	zProvLocation[PROVISION_LOCATION_LEN];
+		char	zStatusReasonCode[STATUS_REASON_CODE_LEN];
+		char	zImsi[IMSI_LEN];
+		int		iCmdSeqNumber;
+		char	zOperator[OPERATOR_LEN];
+
+
+		char	zToday[DATE_LEN];
+	EXEC SQL END DECLARE SECTION;
+
+	EXEC SQL WHENEVER SQLERROR DO SqlError("ORACLE error : DisconnectionEngine::InsertToPendingCommandsTable 1");
+	EXEC SQL SELECT SYSDATE INTO :zToday FROM DUAL;
+
+	
+	EXEC SQL WHENEVER SQLERROR DO SqlError("ORACLE error : DisconnectionEngine::InsertToPendingCommandsTable 2");
+	
+	int	iCount = 0;
+	map<double, map<int,DisconnectData* >* >::iterator ite_max_os;
+	ite_max_os = map_MaxOutstandingAmounts.begin();
+	map<int,DisconnectData* >::iterator	ite_contracts;
+	
+	for( ;ite_max_os != map_MaxOutstandingAmounts.end(); ite_max_os++)
+	{
+		ite_contracts = ite_max_os->second->begin();
+
+		for( ; ite_contracts != ite_max_os->second->end(); ite_contracts++)
+		{
+			DisconnectData* pDisconnectData = ite_contracts->second;
+			if(pDisconnectData != NULL)
+			{
+				if(iCount < i_MaxActionCount )
+				{
+					d_LastExecutedOutstanding = 0.0;
+
+					//Assign Data
+					iGroupID = GetNextGroupID();						//ok - get this from sequence
+					iConnectionID = pDisconnectData->i_ConnectionID;	//ok
+					strcpy(zActionCode,z_ActionCode);					//ok - both_way->OABD, one_way->OAOB
+					strcpy(zService,"PROFILE");							//ok
+					strcpy(zActivationDate,zToday);						//ok
+					strcpy(zIndividualBatch,"B");						//ok
+					strcpy(zProvLocation,"ALC-ERIC");					//ok
+					strcpy(zStatusReasonCode,z_StatusReason);			//ok - OW->BB, BW->BT
+					strcpy(zImsi,pDisconnectData->z_Imsi);				//ok
+					iCmdSeqNumber = 0;									//ok
+					sprintf(zOperator,"BD_%s_%s",z_BillRunCode,z_OperationMode);	//ok
+					//
+
+					//call stored proc
+					EXEC SQL EXECUTE 
+					BEGIN 
+						NEW_PROV_HANDLING_ENTRIES.provision(:iGroupID, 
+															:iConnectionID,
+															:zActionCode,
+															:zService,
+															:zActivationDate,
+															:zIndividualBatch,
+															:zProvLocation,
+															:zStatusReasonCode,
+															:zImsi,
+															:iCmdSeqNumber,
+															:zOperator); 
+					END; 
+					END-EXEC;
+					//
+					
+					strcpy(ite_contracts->second->z_Status,"TAKEN");	//update the action status for details
+					i_TotalActionTaken++;	//Keep track of Action taken Contracts
+					d_LastExecutedOutstanding = pDisconnectData->d_OutstandingAmount;
+				}
+				else
+				{
+					f_log<<"Max action count exceeded "<<iCount<<endl;
+					strcpy(ite_contracts->second->z_Status,"MAX_ACTION");	//update the action status for details
+				}
+
+				iCount++;
+			}
+		}
+	}
+
+	i_TotalActionRejected = iCount - i_TotalActionTaken;
+
+	EXEC SQL COMMIT;
+}
+
+////////////////////////////////////////////////////////////////////////////////////
+
+
